@@ -583,6 +583,13 @@ void ShellSurface::setOpacity(double opacity)
                                              wl_fixed_from_double(std::clamp(opacity, 0.0, 1.0)));
 }
 
+void ShellSurface::setFullScreenBars(int height, bool push)
+{
+    if (m_connection.windowHints())
+        cutefish_window_hints_v1_set_fullscreen_bars(m_connection.windowHints(), m_surface, std::max(height, 0),
+                                                     push ? 1 : 0);
+}
+
 bool ShellSurface::setScreenPosition(PointF position)
 {
     cutefish_window_placement_v1* placement = m_connection.windowPlacement();
@@ -724,16 +731,33 @@ void ShellSurface::prepareCommit(int width, int height, bool opaque)
     m_committedHeight = height;
     m_committedOpaque = opaque;
 
-    if (!m_frameCallback) {
-        m_frameCallback = wl_surface_frame(m_surface);
-        wl_callback_add_listener(m_frameCallback, &ShellSurfaceListeners::frame, this);
-    }
+    requestFrame();
 
     if (m_connection.presentation()) {
         struct wp_presentation_feedback* feedback =
             wp_presentation_feedback(m_connection.presentation(), m_surface);
         wp_presentation_feedback_add_listener(feedback, &ShellSurfaceListeners::feedback, this);
         m_feedbacks.insert(feedback);
+    }
+}
+
+bool ShellSurface::canCommitUnchanged(int width, int height, bool opaque) const
+{
+    return !m_configurePending && width == m_committedWidth && height == m_committedHeight
+            && opaque == m_committedOpaque;
+}
+
+void ShellSurface::commitUnchanged()
+{
+    requestFrame();
+    wl_surface_commit(m_surface);
+}
+
+void ShellSurface::requestFrame()
+{
+    if (!m_frameCallback) {
+        m_frameCallback = wl_surface_frame(m_surface);
+        wl_callback_add_listener(m_frameCallback, &ShellSurfaceListeners::frame, this);
     }
 }
 

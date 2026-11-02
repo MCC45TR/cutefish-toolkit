@@ -118,6 +118,8 @@ public:
     virtual void setBodyShape(const Path&) {}
     virtual void setCastsShadow(bool) {}
     virtual void setOpacity(double) {}
+    // See Window::setFullScreenBars().
+    virtual void setFullScreenBars(int, bool) {}
     // A toplevel's top left in the compositor's global logical coordinates;
     // false where the compositor places windows itself.
     virtual bool setScreenPosition(PointF) { return false; }
@@ -138,12 +140,19 @@ public:
 
     // Draws a frame of the logical size at the scale and presents it.
     virtual bool present(SizeF size, double scale, bool opaque, const PaintFunction& paint) = 0;
+    // Asks for the next frame with a commit that keeps the buffer shown, for
+    // a frame that changes nothing; false where that would leave something
+    // unanswered, such as a configure or a new size, so a frame is presented.
+    virtual bool presentUnchanged(SizeF, double, bool) { return false; }
     // Headless only: the buffer last presented.
     virtual const Image* presentedImage() const { return nullptr; }
     // Headless only: the moves the window asked for.
     virtual int moveRequests() const { return 0; }
     // Headless only: the glass last asked for.
     virtual std::optional<GlassMaterial> requestedGlass() const { return std::nullopt; }
+
+    // See Window::setFullScreenRevealHandler().
+    std::function<void(int offset, int durationMs)> onFullScreenReveal;
 
 protected:
     // Another window's platform side, such as a window a drag carries.
@@ -152,6 +161,7 @@ protected:
     void notifyConfigure(int width, int height, const WindowStates& states);
     void notifyConfigureBounds(int width, int height);
     void notifyInteractiveResize(bool active);
+    void notifyFullScreenReveal(int offset, int durationMs);
     void notifyScaleChanged(double scale);
     void notifyCloseRequested();
     void notifyFrameDone();

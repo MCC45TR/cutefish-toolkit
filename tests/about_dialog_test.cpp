@@ -12,8 +12,10 @@
 #include "ui/about_dialog.h"
 #include "ui/application.h"
 #include "ui/cell_layout.h"
+#include "ui/keys.h"
 #include "ui/label.h"
 #include "ui/test_input.h"
+#include "ui/theme.h"
 #include "ui/window.h"
 #include "ui/window_header.h"
 
@@ -78,6 +80,13 @@ struct Fixture
 // 40 high header, another 40 under it; everything centred.
 TEST(AboutDialogTest, LaysOutAsFishUI)
 {
+    // The reference was measured in Noto Sans, whatever the machine's
+    // default face.
+    const Theme original = Theme::current();
+    Theme theme = original;
+    theme.fontFamily = "Noto Sans";
+    Theme::setCurrent(theme);
+
     Fixture f;
     Window* window = f.dialog.window();
     ASSERT_NE(window, nullptr);
@@ -110,6 +119,8 @@ TEST(AboutDialogTest, LaysOutAsFishUI)
     const std::vector<WindowHeader*> headers = viewsOf<WindowHeader>(window);
     ASSERT_EQ(headers.size(), 1u);
     EXPECT_EQ(headers[0]->geometry(), (RectF{0, 0, 300, 40}));
+
+    Theme::setCurrent(original);
 }
 
 TEST(AboutDialogTest, OpensTheLinkAndCloses)
@@ -126,6 +137,15 @@ TEST(AboutDialogTest, OpensTheLinkAndCloses)
     EXPECT_EQ(f.dialog.window(), window);
 
     window->onCloseRequested();
+    EXPECT_FALSE(f.dialog.isShown());
+    EXPECT_EQ(f.closed, 1);
+    Application::instance()->loop().dispatch();
+}
+
+TEST(AboutDialogTest, EscapeCloses)
+{
+    Fixture f;
+    TestInput::typeKey(*f.dialog.window(), key::Escape);
     EXPECT_FALSE(f.dialog.isShown());
     EXPECT_EQ(f.closed, 1);
     Application::instance()->loop().dispatch();

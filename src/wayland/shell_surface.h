@@ -80,6 +80,9 @@ public:
         virtual void configureBounds(int, int) {}
         // The user started or ended resizing the window by an edge.
         virtual void interactiveResize(bool) {}
+        // The panel along the screen's top starts to slide over the
+        // fullscreen window, reaching `offset` down, or away when 0.
+        virtual void fullScreenReveal(int, int) {}
         // Where a toplevel's top left is on the screen, in the compositor's
         // global logical coordinates; only where it may place itself.
         virtual void screenPosition(PointF) {}
@@ -171,6 +174,8 @@ public:
     void setCastsShadow(bool castsShadow);
     // See cutefish_window_hints_v1.set_opacity.
     void setOpacity(double opacity);
+    // See cutefish_window_hints_v1.set_fullscreen_bars.
+    void setFullScreenBars(int height, bool push);
     // A toplevel's top left at a point in the compositor's global logical
     // coordinates, the next time it maps or at once when it is mapped; false
     // when the compositor does not let this client place its windows.
@@ -188,11 +193,18 @@ public:
     // the configure ack, the viewport, the opaque region, the next frame
     // callback and presentation feedback.
     void prepareCommit(int width, int height, bool opaque);
+    // Whether a commit without a buffer leaves nothing unanswered: no
+    // configure to ack, the size and opaque region as last committed.
+    bool canCommitUnchanged(int width, int height, bool opaque) const;
+    // Commits the pending surface state without a buffer, with the next
+    // frame callback.
+    void commitUnchanged();
 
 private:
     friend struct ShellSurfaceListeners;
 
     void createSurface();
+    void requestFrame();
     void createXdgSurface();
 
     Connection& m_connection;

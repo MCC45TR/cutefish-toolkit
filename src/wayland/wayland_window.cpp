@@ -371,6 +371,20 @@ bool WaylandWindow::present(SizeF size, double scale, bool opaque, const PaintFu
     return true;
 }
 
+bool WaylandWindow::presentUnchanged(SizeF size, double scale, bool opaque)
+{
+    if (!m_shell || !m_eglWindow || int(std::lround(size.width * scale)) != m_bufferWidth
+        || int(std::lround(size.height * scale)) != m_bufferHeight
+        || !m_shell->canCommitUnchanged(int(size.width), int(size.height), opaque))
+        return false;
+    for (SubsurfaceClient* client : std::vector<SubsurfaceClient*>(m_subsurfaces))
+        client->parentCommitting();
+    m_shell->commitUnchanged();
+    for (SubsurfaceClient* client : std::vector<SubsurfaceClient*>(m_subsurfaces))
+        client->parentCommitted();
+    return true;
+}
+
 void WaylandWindow::configure(int width, int height, const WindowStates& states)
 {
     // A status item's width is its own.
@@ -396,6 +410,12 @@ void WaylandWindow::setOpacity(double opacity)
     m_opacity = opacity;
     if (m_shell)
         m_shell->setOpacity(opacity);
+}
+
+void WaylandWindow::setFullScreenBars(int height, bool push)
+{
+    if (m_shell)
+        m_shell->setFullScreenBars(height, push);
 }
 
 bool WaylandWindow::setScreenPosition(PointF position)
@@ -465,6 +485,11 @@ void WaylandWindow::configureBounds(int width, int height)
 void WaylandWindow::interactiveResize(bool active)
 {
     notifyInteractiveResize(active);
+}
+
+void WaylandWindow::fullScreenReveal(int offset, int durationMs)
+{
+    notifyFullScreenReveal(offset, durationMs);
 }
 
 uint32_t WaylandWindow::dragEnter(double x, double y, DropOffer* offer, uint32_t modifiers)

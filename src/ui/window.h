@@ -214,6 +214,16 @@ public:
     // to 1 (the default 1). At 0 it is unseen but still takes the pointer.
     // At once.
     void setOpacity(double opacity);
+    // While full screen: the bars the window draws along its top, `height`
+    // logical pixels tall. While the panel along the top of the screen is
+    // over the window the pointer on them keeps it there, and with `push`
+    // the compositor moves the whole window down under the panel. At once.
+    void setFullScreenBars(int height, bool push);
+    // While full screen: called as the panel along the top of the screen
+    // starts to slide over the window, reaching `offset` logical pixels into
+    // it, or away when `offset` is 0; the slide takes `durationMs` and eases
+    // out.
+    void setFullScreenRevealHandler(std::function<void(int offset, int durationMs)> handler);
     // Puts the window's top left at a point in the compositor's global
     // logical coordinates (Application::screens()): before show() it opens
     // there, afterwards it moves there; the compositor keeps it reachable.
@@ -231,10 +241,12 @@ public:
     // Kept out of the dock and the window switcher, as tool windows are.
     void setSkipTaskbar(bool skip);
     // The main menu the status bar shows while this window is active, in
-    // place of the application's (Application::setMainMenu); null goes back
-    // to the application's. Not owned; it stays while the window shows it.
+    // place of the transient parent's or the application's
+    // (Application::setMainMenu); null goes back to those. Not owned; it
+    // stays while the window shows it.
     void setMainMenu(Menu* menu);
-    // The window's own main menu, else the application's; null for a popup.
+    // The window's own main menu, else its transient parent's, else the
+    // application's; null for a popup.
     Menu* mainMenu() const;
     // Above ordinary windows.
     void setAlwaysOnTop(bool onTop);
@@ -364,6 +376,9 @@ private:
     friend class Application;
     // Repaints and notifies when isActive() differs from what was notified.
     void updateActive();
+    // Hands mainMenu() to the platform, here and in the transient children
+    // without a menu of their own.
+    void updateMainMenu();
     Color backgroundColor() const;
 
     friend class EmbeddedWindow;
@@ -454,11 +469,14 @@ private:
     bool pressMovesWindow() const;
 
     void scheduleFrame();
+    void answerConfigureLater();
     // A layout pass for the views marked as needing one, which may be none.
     void scheduleLayout();
     // `prepared`: prepareFrame() already ran at this frame time.
     bool renderFrame(uint64_t frameTimeNs, bool prepared = false);
     std::vector<Rect> paintFrame(SkCanvas* canvas, int bufferAge);
+    // Whether the frame being prepared changes any pixel.
+    bool hasPendingDamage() const;
     // Device pixels the view and its children cover, untransformed below the
     // view itself; `painted` asks how they were last painted, not will be.
     SkIRect subtreeRect(const View* view, PointF origin, bool painted) const;
@@ -547,6 +565,11 @@ private:
     bool m_framePending = false;
     bool m_renderPosted = false;
     bool m_rendering = false;
+    // A configure not yet answered by a frame, and whether a frame since the
+    // last frame callback answered one.
+    bool m_configureUnanswered = false;
+    bool m_configureAnswered = false;
+    int m_configureTimer = 0;
     FrameStatistics m_statistics;
     uint64_t m_frameTimeNs = 0;
     uint64_t m_refreshNs = 16666667;
