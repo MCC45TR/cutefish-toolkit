@@ -184,6 +184,12 @@ public:
     // a bubble's, as cutefish_surface_blur_v1.set_shape; empty for none.
     // Several subpaths blur several areas; the blur rect must cover them.
     void setBackgroundBlurShape(const Path& path);
+    // A rounded rect the compositor blurs over the subsurfaces placed below
+    // the window (a GPU-drawn video or document under translucent content),
+    // together with what is behind the window, before the window's own
+    // pixels; an empty rect for none. Wayland only; applies with the next
+    // frame.
+    void setSubsurfaceBlur(const RectF& rect, double radius);
     // Glass instead of the plain blur over the blur rect, or the plain blur
     // again without one. Wayland only; applies with the next frame.
     void setBackgroundGlass(const std::optional<GlassMaterial>& material);
@@ -224,6 +230,10 @@ public:
     // it, or away when `offset` is 0; the slide takes `durationMs` and eases
     // out.
     void setFullScreenRevealHandler(std::function<void(int offset, int durationMs)> handler);
+    // Called for every frame the window renders, after its frame clients
+    // ticked and before it lays out: what the handler changes in the tree
+    // lands in that frame.
+    void setPrepareFrameHandler(std::function<void()> handler);
     // Puts the window's top left at a point in the compositor's global
     // logical coordinates (Application::screens()): before show() it opens
     // there, afterwards it moves there; the compositor keeps it reachable.

@@ -453,6 +453,13 @@ void Window::setBackgroundBlurShape(const Path& path)
     scheduleFrame();
 }
 
+void Window::setSubsurfaceBlur(const RectF& rect, double radius)
+{
+    m_platform->setSubsurfaceBlur(rect, radius);
+    // Surface state the next commit carries.
+    scheduleFrame();
+}
+
 void Window::setBackgroundGlass(const std::optional<GlassMaterial>& material)
 {
     m_platform->setGlass(material);
@@ -548,6 +555,11 @@ void Window::setFullScreenBars(int height, bool push)
 void Window::setFullScreenRevealHandler(std::function<void(int offset, int durationMs)> handler)
 {
     m_platform->onFullScreenReveal = std::move(handler);
+}
+
+void Window::setPrepareFrameHandler(std::function<void()> handler)
+{
+    m_platform->onPrepareFrame = std::move(handler);
 }
 
 bool Window::setScreenPosition(PointF position)
@@ -1702,6 +1714,8 @@ void Window::prepareFrame(uint64_t frameTimeNs)
             && client->m_ticking)
             client->tick(frameTimeNs);
     }
+    if (m_platform->onPrepareFrame)
+        m_platform->onPrepareFrame();
 
     if (layoutIfNeeded()) {
         updateHover();
