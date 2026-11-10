@@ -127,6 +127,38 @@ struct FrameStatistics
     uint64_t discarded = 0;
 };
 
+// What a blur behind part of a window lays over the blurred backdrop: a
+// tint, then a colour blended over that by one of the W3C compositing modes
+// (None for no fill). Straight colours, 0 to 1.
+struct BackdropFill
+{
+    enum class Blend {
+        None,
+        Normal,
+        Multiply,
+        Screen,
+        Overlay,
+        Darken,
+        Lighten,
+        ColorDodge,
+        ColorBurn,
+        HardLight,
+        SoftLight,
+        Difference,
+        Exclusion,
+        Hue,
+        Saturation,
+        Color,
+        Luminosity,
+    };
+
+    double tint[4] = {0, 0, 0, 0};
+    Blend blend = Blend::None;
+    double color[4] = {0, 0, 0, 0};
+
+    bool operator==(const BackdropFill&) const = default;
+};
+
 // A top-level window drawing its own frame, or a popup of one. It renders on
 // the UI thread, once per frame callback, and a configure is answered by the
 // next commit with a buffer of the new size.
@@ -190,6 +222,15 @@ public:
     // pixels; an empty rect for none. Wayland only; applies with the next
     // frame.
     void setSubsurfaceBlur(const RectF& rect, double radius);
+    // The outline masking that blur instead of its rounded rect, clipped to
+    // it; several subpaths blur several areas. Empty for none. Wayland only;
+    // applies with the next frame.
+    void setSubsurfaceBlurShape(const Path& path);
+    // What that blur lays over what it blurred, before the window's pixels:
+    // a tint, then a colour blended over that, as a translucent panel whose
+    // content blends with what shows behind it. Wayland only; applies with
+    // the next frame.
+    void setSubsurfaceBlurFill(const BackdropFill& fill);
     // Glass instead of the plain blur over the blur rect, or the plain blur
     // again without one. Wayland only; applies with the next frame.
     void setBackgroundGlass(const std::optional<GlassMaterial>& material);
@@ -468,6 +509,7 @@ private:
     void paintContent(SkCanvas* canvas, const SkRegion* region);
     void updateHover();
     void updateHoverChain();
+    void deferHover();
     void updateCursor();
     void scheduleToolTip(View* view);
     void showToolTip(View* view, const RectF& rect, const std::string& text);
@@ -579,6 +621,8 @@ private:
     // last frame callback answered one.
     bool m_configureUnanswered = false;
     bool m_configureAnswered = false;
+    // The frame callback waited for came with a commit that drew nothing.
+    bool m_framePendingUnchanged = false;
     int m_configureTimer = 0;
     FrameStatistics m_statistics;
     uint64_t m_frameTimeNs = 0;
@@ -587,6 +631,10 @@ private:
     PointF m_pointer;
     // Layout passes re-hover only a pointer still over the window.
     bool m_pointerInside = false;
+    // Set by FrameClient::deferHover() in this frame's ticks.
+    bool m_hoverDeferred = false;
+    // A deferred frame skipped a hover update; frames keep coming until one makes it.
+    bool m_hoverStale = false;
     View* m_hovered = nullptr;
     // The views tracking hover that the pointer is within, deepest first.
     std::vector<View*> m_hoverChain;

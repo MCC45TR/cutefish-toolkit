@@ -460,6 +460,18 @@ void Window::setSubsurfaceBlur(const RectF& rect, double radius)
     scheduleFrame();
 }
 
+void Window::setSubsurfaceBlurShape(const Path& path)
+{
+    m_platform->setSubsurfaceBlurShape(path);
+    scheduleFrame();
+}
+
+void Window::setSubsurfaceBlurFill(const BackdropFill& fill)
+{
+    m_platform->setSubsurfaceBlurFill(fill);
+    scheduleFrame();
+}
+
 void Window::setBackgroundGlass(const std::optional<GlassMaterial>& material)
 {
     m_platform->setGlass(material);
@@ -911,7 +923,7 @@ void Window::handleFrameDone()
 {
     m_framePending = false;
     m_configureAnswered = false;
-    if (m_needsFrame || hasTickingClients())
+    if (m_needsFrame || m_hoverStale || hasTickingClients())
         postRender();
 }
 
@@ -1510,8 +1522,14 @@ void Window::updateHoverChain()
     }
 }
 
+void Window::deferHover()
+{
+    m_hoverDeferred = true;
+}
+
 void Window::updateHover()
 {
+    m_hoverStale = false;
     updateHoverChain();
     View* view = m_contentView && m_pointerInside ? viewAt(m_pointer, true) : nullptr;
     if (view != m_hovered) {
@@ -1627,8 +1645,12 @@ void Window::updateCursor()
 
 void Window::scheduleRender()
 {
-    // A paint asked for while rendering is drawn on the next frame.
-    if (!m_configured || m_framePending || m_rendering || m_platform->isHeadless())
+    // A paint asked for while rendering is drawn on the next frame. One
+    // asked for while only a frame that drew nothing is pending, as an
+    // animation without visible progress ticks, renders at once and its
+    // commit takes over that frame's callback: it shows at the next refresh,
+    // as in a window that was idle.
+    if (!m_configured || (m_framePending && !m_framePendingUnchanged) || m_rendering || m_platform->isHeadless())
         return;
     // The host renders when it composites next.
     if (m_platform->isEmbedded()) {
@@ -1670,6 +1692,7 @@ bool Window::renderFrame(uint64_t frameTimeNs, bool prepared)
     if (!hasPendingDamage() && m_platform->presentUnchanged(m_size, m_scale, background.a == 255)) {
         m_rendering = false;
         m_framePending = true;
+        m_framePendingUnchanged = true;
         return true;
     }
     const bool presented = m_platform->present(
@@ -1681,6 +1704,7 @@ bool Window::renderFrame(uint64_t frameTimeNs, bool prepared)
 
     // Headless and embedded windows hear of no frame callbacks.
     m_framePending = !m_platform->isHeadless() && !m_platform->isEmbedded();
+    m_framePendingUnchanged = false;
     if (std::exchange(m_configureUnanswered, false))
         m_configureAnswered = true;
     ++m_statistics.rendered;
@@ -1717,7 +1741,10 @@ void Window::prepareFrame(uint64_t frameTimeNs)
     if (m_platform->onPrepareFrame)
         m_platform->onPrepareFrame();
 
-    if (layoutIfNeeded()) {
+    const bool laidOut = layoutIfNeeded();
+    if (std::exchange(m_hoverDeferred, false)) {
+        m_hoverStale = true;
+    } else if (laidOut || m_hoverStale) {
         updateHover();
     } else if (m_pointerInside) {
         // A scroll or an animation may have moved a view under the pointer.
