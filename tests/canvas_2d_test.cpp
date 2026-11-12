@@ -46,6 +46,54 @@ TEST(Canvas2DTest, FillsThroughTheTransform)
     EXPECT_EQ(bitmap.pixel(1, 1), 0u);
 }
 
+// Anticlockwise from the top edge: a round upper left corner, a square lower
+// left, a smaller round lower right and a square upper right.
+static Path mixedCornerOutline()
+{
+    const double k = 0.5522847498;
+    Path path;
+    path.moveTo(12, 2);
+    path.cubicTo(12 - 10 * k, 2, 2, 12 - 10 * k, 2, 12);
+    path.lineTo(2, 30);
+    path.lineTo(32, 30);
+    path.cubicTo(32 + 6 * k, 30, 38, 24 + 6 * k, 38, 24);
+    path.lineTo(38, 2);
+    path.close();
+    return path;
+}
+
+static void expectMixedCorners(const Bitmap& bitmap)
+{
+    EXPECT_EQ(bitmap.pixel(20, 16), 0xFFFF0000u);
+    EXPECT_EQ(bitmap.pixel(3, 3), 0u);
+    EXPECT_EQ(bitmap.pixel(6, 6), 0xFFFF0000u);
+    EXPECT_EQ(bitmap.pixel(3, 28), 0xFFFF0000u);
+    EXPECT_EQ(bitmap.pixel(37, 29), 0u);
+    EXPECT_EQ(bitmap.pixel(35, 27), 0xFFFF0000u);
+    EXPECT_EQ(bitmap.pixel(36, 3), 0xFFFF0000u);
+    EXPECT_EQ(bitmap.pixel(1, 16), 0u);
+    EXPECT_EQ(bitmap.pixel(39, 16), 0u);
+}
+
+TEST(Canvas2DTest, FillsARoundedOutlineCornerByCorner)
+{
+    Bitmap bitmap(40, 32, Format::Argb32Premultiplied);
+    Canvas2D canvas(bitmap);
+    canvas.setFillColor(kRed);
+    canvas.fillPath(mixedCornerOutline());
+    expectMixedCorners(bitmap);
+}
+
+TEST(Canvas2DTest, ClipsToARoundedOutlineCornerByCorner)
+{
+    Bitmap bitmap(40, 32, Format::Argb32Premultiplied);
+    Canvas2D canvas(bitmap);
+    canvas.clipToPath(mixedCornerOutline());
+    canvas.setFillColor(kRed);
+    canvas.fillRect({0, 0, 40, 32});
+    expectMixedCorners(bitmap);
+}
+
 TEST(Canvas2DTest, BlursTheBackdropInsideThePath)
 {
     // Red on the left half, blue on the right; the blur is over the middle.
@@ -175,6 +223,41 @@ TEST(Canvas2DTest, ClipsSavesAndAlpha)
     canvas.fillRect({0, 0, 10, 10});
     EXPECT_EQ(bitmap.pixel(1, 1), 0xFFFF0000u);
     EXPECT_EQ(bitmap.pixel(8, 8), 0u);
+}
+
+TEST(Canvas2DTest, ClipsToABitmapsAlpha)
+{
+    Bitmap mask(2, 2, Format::Argb32Premultiplied);
+    mask.fill(0u);
+    mask.setPixel(0, 0, 0xFF000000u);
+    mask.setPixel(1, 1, 0x80000000u);
+
+    Bitmap bitmap(12, 12, Format::Argb32Premultiplied);
+    Canvas2D canvas(bitmap);
+    canvas.setImageSmoothing(Canvas2D::Smoothing::None);
+    canvas.setFillColor(kBlue);
+    canvas.fillRect({0, 0, 12, 12});
+
+    canvas.save();
+    canvas.clipToBitmap(mask, {2, 2, 8, 8});
+    canvas.setFillColor(kRed);
+    canvas.fillRect({0, 0, 12, 12});
+    canvas.restore();
+    EXPECT_EQ(bitmap.pixel(3, 3), 0xFFFF0000u);
+    EXPECT_EQ(bitmap.pixel(8, 3), 0xFF0000FFu);
+    EXPECT_NEAR(double((bitmap.pixel(8, 8) >> 16) & 0xff), 128, 1);
+    // Outside the rect nothing is drawn, whatever the bitmap's edge holds.
+    EXPECT_EQ(bitmap.pixel(1, 1), 0xFF0000FFu);
+
+    // Clearing reaches what was drawn before the clip.
+    canvas.save();
+    canvas.clipToBitmap(ui::RetainedBitmap(mask), {2, 2, 8, 8}, true);
+    canvas.clearRect({0, 0, 12, 12});
+    canvas.restore();
+    EXPECT_EQ(bitmap.pixel(3, 8), 0u);
+    EXPECT_EQ(bitmap.pixel(3, 3), 0xFFFF0000u);
+    EXPECT_NEAR(double(bitmap.alpha(8, 3)), 127, 1);
+    EXPECT_EQ(bitmap.pixel(1, 1), 0xFF0000FFu);
 }
 
 TEST(Canvas2DTest, StrokesAndDashes)
