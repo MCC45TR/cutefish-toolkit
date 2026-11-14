@@ -291,7 +291,7 @@ public:
     void setUserResizable(bool resizable);
     // Kept out of the dock and the window switcher, as tool windows are.
     void setSkipTaskbar(bool skip);
-    // The main menu the status bar shows while this window is active, in
+    // The main menu the menu bar shows while this window is active, in
     // place of the transient parent's or the application's
     // (Application::setMainMenu); null goes back to those. Not owned; it
     // stays while the window shows it.
@@ -299,6 +299,10 @@ public:
     // The window's own main menu, else its transient parent's, else the
     // application's; null for a popup.
     Menu* mainMenu() const;
+    // The picture the pointer shows over views asking for
+    // CursorShape::Image: `image` in device pixels at `scale` per point,
+    // the hot spot in points from its top left.
+    void setCursorImage(const Bitmap& image, int scale, const PointF& hotSpot);
     // Above ordinary windows.
     void setAlwaysOnTop(bool onTop);
     // The header's colour mode for the window buttons, whatever the theme,
@@ -327,7 +331,7 @@ public:
     void setMaximized(bool maximized);
     void setFullScreen(bool fullScreen);
     void minimize();
-    // Hides every window of the application, as the status bar's Hide does.
+    // Hides every window of the application, as the menu bar's Hide does.
     void hideApplication();
     // Kept above the parent window and opened over it; a modal one blocks it.
     void setTransientParent(Window* parent, bool modal);
@@ -430,6 +434,8 @@ private:
     // Hands mainMenu() to the platform, here and in the transient children
     // without a menu of their own.
     void updateMainMenu();
+    // Hands Application::dockMenu() to the platform.
+    void updateDockMenu();
     Color backgroundColor() const;
 
     friend class EmbeddedWindow;
@@ -496,7 +502,8 @@ private:
     void scheduleRender();
     void postRender();
     void render();
-    void prepareFrame(uint64_t frameTimeNs);
+    // False when the window was destroyed by a frame client's tick.
+    bool prepareFrame(uint64_t frameTimeNs);
     // Lays the views out when something asked for it; false when nothing did.
     bool layoutIfNeeded();
     // Lays everything out again and reports the views whose geometry the

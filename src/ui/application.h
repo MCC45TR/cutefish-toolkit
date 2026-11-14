@@ -101,12 +101,16 @@ public:
     base::dbus::Connection* sessionBus() const { return m_sessionBus; }
     const std::vector<Window*>& windows() const { return m_windows; }
 
-    // The main menu the status bar shows while one of the application's
+    // The main menu the menu bar shows while one of the application's
     // windows is active, unless the window has its own: its rows are the
     // bar's entries, and the submenu with MenuRole::Application opens from
     // the application's name. Not owned; it stays while it is the main menu.
     void setMainMenu(Menu* menu);
     Menu* mainMenu() const { return m_mainMenu; }
+    // The entries the dock's menu for the application shows after its
+    // windows. Not owned; it stays while it is the dock menu.
+    void setDockMenu(Menu* menu);
+    Menu* dockMenu() const;
 
     struct Screen
     {
@@ -120,7 +124,7 @@ public:
         RectF workArea;
         // Device pixels per logical pixel.
         double scale = 1;
-        // The one with the status bar.
+        // The one with the menu bar.
         bool primary = false;
     };
     // The outputs, known from the start, before any window; none off

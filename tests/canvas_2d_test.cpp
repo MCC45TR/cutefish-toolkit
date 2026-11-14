@@ -3,7 +3,9 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cmath>
+#include <vector>
 #include <sys/mman.h>
 #include <unistd.h>
 
@@ -116,6 +118,177 @@ TEST(Canvas2DTest, BlursTheBackdropInsideThePath)
     // Outside the path nothing changes.
     EXPECT_EQ(bitmap.pixel(12, 10), outside);
     EXPECT_EQ(bitmap.pixel(30, 10), 0xFF0000FFu);
+}
+
+static Bitmap blurredBackdrop(double saturation)
+{
+    Bitmap bitmap(40, 20, Format::Argb32Premultiplied);
+    Canvas2D canvas(bitmap);
+    canvas.setFillColor({0.4, 0.75, 0.3, 1});
+    canvas.fillRect({0, 0, 20, 20});
+    canvas.setFillColor({0.9, 0.5, 0.6, 1});
+    canvas.fillRect({20, 0, 20, 20});
+    Path path;
+    path.addRoundedRect({6, 2, 28, 16}, 6, 6);
+    if (saturation < 0)
+        canvas.blurBackdrop(path, 8);
+    else
+        canvas.blurBackdrop(path, 8, saturation);
+    return bitmap;
+}
+
+static uint64_t pixelSum(const Bitmap& bitmap)
+{
+    uint64_t sum = 0;
+    for (int y = 0; y < bitmap.height(); ++y) {
+        for (int x = 0; x < bitmap.width(); ++x)
+            sum = sum * 31 + bitmap.pixel(x, y);
+    }
+    return sum;
+}
+
+TEST(Canvas2DTest, BackdropBlurWithoutSaturationIsUnchanged)
+{
+    // The plain blur's pixels as they were before saturation existed.
+    const Bitmap plain = blurredBackdrop(-1);
+    EXPECT_EQ(pixelSum(plain), 1676948802072002144u);
+    EXPECT_EQ(pixelSum(blurredBackdrop(1)), pixelSum(plain));
+}
+
+TEST(Canvas2DTest, BackdropBlurSaturationDeepensColour)
+{
+    const Bitmap plain = blurredBackdrop(1), saturated = blurredBackdrop(2);
+    const auto chroma = [](uint32_t pixel) {
+        const int r = (pixel >> 16) & 0xFF, g = (pixel >> 8) & 0xFF, b = pixel & 0xFF;
+        return std::max({r, g, b}) - std::min({r, g, b});
+    };
+    EXPECT_GT(chroma(saturated.pixel(10, 10)), chroma(plain.pixel(10, 10)) + 20);
+    EXPECT_GT(chroma(saturated.pixel(30, 10)), chroma(plain.pixel(30, 10)) + 20);
+    // Outside the path nothing changes.
+    EXPECT_EQ(saturated.pixel(2, 10), plain.pixel(2, 10));
+    EXPECT_EQ(saturated.pixel(10, 0), plain.pixel(10, 0));
+}
+
+static void fillBackdrop(Canvas2D& canvas, double leftAlpha)
+{
+    canvas.setFillColor({0.9, 0.1, 0.1, leftAlpha});
+    canvas.fillRect({0, 0, 20, 20});
+    canvas.setFillColor({0.1, 0.2, 0.9, 1});
+    canvas.fillRect({20, 0, 20, 20});
+}
+
+static uint32_t over(uint32_t source, uint32_t destination)
+{
+    // Premultiplied source over destination, per channel.
+    const unsigned keep = 255 - (source >> 24);
+    uint32_t out = 0;
+    for (int shift = 0; shift < 32; shift += 8) {
+        const unsigned s = (source >> shift) & 0xFF, d = (destination >> shift) & 0xFF;
+        out |= std::min(255u, s + (d * keep + 127) / 255) << shift;
+    }
+    return out;
+}
+
+static bool near(uint32_t a, uint32_t b, int tolerance)
+{
+    for (int shift = 0; shift < 32; shift += 8) {
+        if (std::abs(int((a >> shift) & 0xFF) - int((b >> shift) & 0xFF)) > tolerance)
+            return false;
+    }
+    return true;
+}
+
+TEST(Canvas2DTest, BackdropBlurSaturationKeepsNeutralColours)
+{
+    // White and greys have no colour to deepen: saturation leaves them as
+    // the plain blur does.
+    for (const double grey : {1.0, 0.93, 0.5}) {
+        Bitmap plain(40, 20, Format::Argb32Premultiplied), saturated(40, 20, Format::Argb32Premultiplied);
+        Canvas2D plainCanvas(plain), saturatedCanvas(saturated);
+        for (Canvas2D* canvas : {&plainCanvas, &saturatedCanvas}) {
+            canvas->setFillColor({grey, grey, grey, 1});
+            canvas->fillRect({0, 0, 40, 20});
+        }
+        Path path;
+        path.addRect({10, 0, 20, 20});
+        plainCanvas.blurBackdrop(path, 8);
+        saturatedCanvas.blurBackdrop(path, 8, 1.8);
+        for (int x : {12, 20, 28})
+            EXPECT_TRUE(near(saturated.pixel(x, 10), plain.pixel(x, 10), 1)) << grey << " " << x;
+    }
+}
+
+TEST(Canvas2DTest, BackdropBelowGroupsOutsideAGroupIsThePlainBlur)
+{
+    Bitmap plain(40, 20, Format::Argb32Premultiplied), below(40, 20, Format::Argb32Premultiplied);
+    Canvas2D plainCanvas(plain), belowCanvas(below);
+    fillBackdrop(plainCanvas, 1);
+    fillBackdrop(belowCanvas, 1);
+    Path path;
+    path.addRoundedRect({6, 2, 28, 16}, 6, 6);
+    plainCanvas.blurBackdrop(path, 8, 1.5);
+    belowCanvas.blurBackdropBelowGroups(path, 8, 1.5);
+    EXPECT_EQ(pixelSum(below), pixelSum(plain));
+}
+
+TEST(Canvas2DTest, BackdropBelowGroupsSeesThroughAGroup)
+{
+    Path path;
+    path.addRect({10, 0, 20, 20});
+    Bitmap reference(40, 20, Format::Argb32Premultiplied);
+    Canvas2D referenceCanvas(reference);
+    fillBackdrop(referenceCanvas, 1);
+    referenceCanvas.blurBackdrop(path, 8);
+
+    // A plain blur inside a group sees only the group's empty layer, so
+    // what is under it shows unblurred.
+    Bitmap inGroup(40, 20, Format::Argb32Premultiplied);
+    Canvas2D inGroupCanvas(inGroup);
+    fillBackdrop(inGroupCanvas, 1);
+    const uint32_t under = inGroup.pixel(18, 10);
+    inGroupCanvas.beginGroup();
+    inGroupCanvas.blurBackdrop(path, 8);
+    inGroupCanvas.endGroup();
+    EXPECT_EQ(inGroup.pixel(18, 10), under);
+
+    Bitmap below(40, 20, Format::Argb32Premultiplied);
+    Canvas2D belowCanvas(below);
+    fillBackdrop(belowCanvas, 1);
+    belowCanvas.beginGroup();
+    belowCanvas.blurBackdropBelowGroups(path, 8, 1);
+    belowCanvas.endGroup();
+    for (int x : {12, 18, 21, 27})
+        EXPECT_TRUE(near(below.pixel(x, 10), reference.pixel(x, 10), 1)) << x;
+    // Outside the path nothing changes.
+    EXPECT_EQ(below.pixel(5, 10), reference.pixel(5, 10));
+    EXPECT_EQ(below.pixel(35, 10), reference.pixel(35, 10));
+}
+
+TEST(Canvas2DTest, BackdropBelowGroupsOverATranslucentSurface)
+{
+    // The blurred backdrop is the group's content, composited once over
+    // what is under the group, also where that is translucent.
+    Path path;
+    path.addRect({10, 0, 20, 20});
+    Bitmap blurred(40, 20, Format::Argb32Premultiplied);
+    Canvas2D blurredCanvas(blurred);
+    fillBackdrop(blurredCanvas, 0.5);
+    blurredCanvas.blurBackdrop(path, 8);
+
+    Bitmap below(40, 20, Format::Argb32Premultiplied);
+    Canvas2D belowCanvas(below);
+    fillBackdrop(belowCanvas, 0.5);
+    std::vector<uint32_t> under;
+    for (int x : {12, 18, 21, 27})
+        under.push_back(below.pixel(x, 10));
+    belowCanvas.beginGroup();
+    belowCanvas.blurBackdropBelowGroups(path, 8, 1);
+    belowCanvas.endGroup();
+    int i = 0;
+    for (int x : {12, 18, 21, 27}) {
+        EXPECT_TRUE(near(below.pixel(x, 10), over(blurred.pixel(x, 10), under[i]), 2)) << x;
+        ++i;
+    }
 }
 
 TEST(Canvas2DTest, RetainedBitmapsDrawAsTheirBitmap)

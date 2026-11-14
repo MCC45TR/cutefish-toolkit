@@ -21,6 +21,7 @@
 
 #include "base/event_loop.h"
 #include "ui/application.h"
+#include "ui/bitmap.h"
 #include "ui/drag.h"
 #include "ui/embedded_platform_window.h"
 #include "ui/embedded_window.h"
@@ -39,6 +40,21 @@
 #include "wayland/wayland_window.h"
 
 namespace cutefish::ui {
+
+// Each window's cursor picture, kept outside the class, which keeps its
+// layout.
+struct CursorImage
+{
+    Bitmap image;
+    int scale = 1;
+    PointF hotSpot;
+};
+
+static std::unordered_map<const Window*, CursorImage>& cursorImages()
+{
+    static std::unordered_map<const Window*, CursorImage> images;
+    return images;
+}
 
 static constexpr uint64_t kDoubleClickNs = 400000000;
 static constexpr auto kToolTipDelay = std::chrono::milliseconds(700);
@@ -161,6 +177,7 @@ Window::Window()
     m_platform = PlatformWindow::create(this, nullptr, {}, false);
     m_platform->setAppId(Application::instance()->applicationId());
     m_platform->setMainMenu(Application::instance()->mainMenu());
+    updateDockMenu();
     Application::instance()->m_windows.push_back(this);
     if (!m_platform->isHeadless() && !m_platform->isEmbedded())
         m_scale = expectedScale();
@@ -173,6 +190,7 @@ Window::Window(TrustedConnection& connection)
     m_platform = std::make_unique<wayland::WaylandWindow>(this, *connection.m_connection, *connection.m_gpu);
     m_platform->setAppId(Application::instance()->applicationId());
     m_platform->setMainMenu(Application::instance()->mainMenu());
+    updateDockMenu();
     Application::instance()->m_windows.push_back(this);
 }
 
@@ -225,6 +243,7 @@ Window::~Window()
     if (m_configureTimer)
         Application::instance()->loop().stopTimer(m_configureTimer);
     std::erase(Application::instance()->m_windows, this);
+    cursorImages().erase(this);
     for (Window* window : Application::instance()->m_windows) {
         if (window->m_transientParent == this) {
             window->m_transientParent = nullptr;
@@ -238,6 +257,8 @@ Window::~Window()
     }
     for (Window* popup : m_popups)
         popup->m_parent = nullptr;
+    // A frame of this window under way holds the pointer and sees it gone.
+    *m_self = nullptr;
     m_self.reset();
     for (FrameClient* client : m_frameClients)
         client->m_window = nullptr;
@@ -269,6 +290,12 @@ Menu* Window::mainMenu() const
     if (m_mainMenu)
         return m_mainMenu;
     return m_transientParent ? m_transientParent->mainMenu() : Application::instance()->mainMenu();
+}
+
+void Window::updateDockMenu()
+{
+    if (auto* platform = dynamic_cast<wayland::WaylandWindow*>(m_platform.get()))
+        platform->setDockMenu(Application::instance()->dockMenu());
 }
 
 void Window::updateMainMenu()
@@ -784,7 +811,8 @@ Image Window::grab(uint64_t frameTimeNs)
 {
     if (!m_contentView)
         return {};
-    prepareFrame(frameTimeNs ? frameTimeNs : monotonicNs());
+    if (!prepareFrame(frameTimeNs ? frameTimeNs : monotonicNs()))
+        return {};
 
     Image image(int(std::lround(m_size.width * m_scale)), int(std::lround(m_size.height * m_scale)));
     // The background is opaque, so premultiplied pixels are the unpremultiplied ones.
@@ -835,6 +863,18 @@ void Window::handleConfigure(int width, int height, const WindowStates& states)
         && m_normalSize.height > 0) {
         width = int(m_normalSize.width);
         height = int(m_normalSize.height);
+    }
+    // A floating window's size suggestion may predate limits the window set
+    // since and the compositor has not seen yet; the limits win, and a
+    // maximum of 0 on an axis is no limit there, as it is to the compositor.
+    if (width > 0 && height > 0 && !constrained) {
+        const auto limit = [](int size, double minimum, double maximum) {
+            const int least = int(std::ceil(minimum));
+            const int most = int(std::floor(maximum));
+            return most > 0 ? std::clamp(size, least, std::max(least, most)) : std::max(size, least);
+        };
+        width = limit(width, m_minimumSize.width, m_maximumSize.width);
+        height = limit(height, m_minimumSize.height, m_maximumSize.height);
     }
     if (width > 0 && height > 0 && (width != m_size.width || height != m_size.height)) {
         m_size = {double(width), double(height)};
@@ -1550,7 +1590,7 @@ void Window::updateHover()
         owner = owner->parent();
     if (owner != m_toolTipDismissed)
         m_toolTipDismissed = nullptr;
-    if (owner != m_toolTipOwner && owner != m_toolTipDismissed)
+    if (owner != m_toolTipOwner && (!owner || owner != m_toolTipDismissed))
         scheduleToolTip(owner);
 }
 
@@ -1625,6 +1665,15 @@ void Window::hideToolTip()
     }
 }
 
+void Window::setCursorImage(const Bitmap& image, int scale, const PointF& hotSpot)
+{
+    cursorImages()[this] = {image, scale, hotSpot};
+    if (m_cursorShape == int(CursorShape::Image)) {
+        m_cursorShape = -1;
+        updateCursor();
+    }
+}
+
 void Window::updateCursor()
 {
     // The view holding the pointer keeps its cursor until the release.
@@ -1640,7 +1689,13 @@ void Window::updateCursor()
     if (int(shape) == m_cursorShape)
         return;
     m_cursorShape = int(shape);
-    m_platform->setCursorShape(shape);
+    const auto image = cursorImages().find(this);
+    auto* platform = dynamic_cast<wayland::WaylandWindow*>(m_platform.get());
+    if (shape == CursorShape::Image && image != cursorImages().end() && platform)
+        platform->setCursorImage(image->second.image, image->second.scale, image->second.hotSpot.x,
+                                 image->second.hotSpot.y);
+    else
+        m_platform->setCursorShape(shape == CursorShape::Image ? CursorShape::Default : shape);
 }
 
 void Window::scheduleRender()
@@ -1666,7 +1721,7 @@ void Window::postRender()
         return;
     m_renderPosted = true;
     Application::instance()->loop().post([self = std::weak_ptr<Window*>(m_self)] {
-        if (const auto window = self.lock())
+        if (const auto window = self.lock(); window && *window)
             (*window)->render();
     });
 }
@@ -1682,8 +1737,9 @@ void Window::render()
 bool Window::renderFrame(uint64_t frameTimeNs, bool prepared)
 {
     m_rendering = true;
-    if (!prepared)
-        prepareFrame(frameTimeNs);
+    // Nothing of the window is left to touch when it went away in the ticks.
+    if (!prepared && !prepareFrame(frameTimeNs))
+        return false;
     // Whatever asked for a paint until here is drawn by this frame.
     m_needsFrame = false;
     const Color background = backgroundColor();
@@ -1729,17 +1785,27 @@ uint64_t Window::frameTime(uint64_t now)
     return m_frameTimeNs;
 }
 
-void Window::prepareFrame(uint64_t frameTimeNs)
+bool Window::prepareFrame(uint64_t frameTimeNs)
 {
-    // A client may stop, or go away, from its own tick.
+    // Being destroyed: its surface may already be gone.
+    if (!m_self)
+        return false;
+    // A client may stop, or go away, from its own tick, and so may the
+    // window: a program closes windows from its animation callbacks.
+    const std::shared_ptr<Window*> self = m_self;
     const std::vector<FrameClient*> clients = m_frameClients;
     for (FrameClient* client : clients) {
         if (std::find(m_frameClients.begin(), m_frameClients.end(), client) != m_frameClients.end()
             && client->m_ticking)
             client->tick(frameTimeNs);
+        if (!*self)
+            return false;
     }
-    if (m_platform->onPrepareFrame)
+    if (m_platform->onPrepareFrame) {
         m_platform->onPrepareFrame();
+        if (!*self)
+            return false;
+    }
 
     const bool laidOut = layoutIfNeeded();
     if (std::exchange(m_hoverDeferred, false)) {
@@ -1756,6 +1822,7 @@ void Window::prepareFrame(uint64_t frameTimeNs)
         collectDamage(m_overlay.get(), {});
     if (m_toolTip)
         collectDamage(m_toolTip.get(), {});
+    return true;
 }
 
 bool Window::layoutIfNeeded()

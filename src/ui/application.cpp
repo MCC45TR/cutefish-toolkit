@@ -13,6 +13,7 @@
 #include "base/event_loop.h"
 #include "base/locale.h"
 #include "base/session_language.h"
+#include "base/thread_pool.h"
 #include "gpu/egl_context.h"
 #include "ui/appearance.h"
 #include "ui/platform_window.h"
@@ -87,6 +88,9 @@ Application::~Application()
 {
     if (m_textLoader.joinable())
         m_textLoader.join();
+    // Work on the shared pool uses static tables that exit() destroys before
+    // the pool, which would otherwise wait for that work only then.
+    base::ThreadPool::global().shutdown();
     // Posted tasks may own windows, whose views still need the loop, the
     // connection and the GPU context while they are destroyed. A host's loop
     // keeps its tasks.
@@ -149,6 +153,23 @@ void Application::setMainMenu(Menu* menu)
         if (!window->m_mainMenu && !window->m_transientParent)
             window->updateMainMenu();
     }
+}
+
+// Kept outside the class, which keeps its layout.
+static Menu* s_dockMenu = nullptr;
+
+void Application::setDockMenu(Menu* menu)
+{
+    s_dockMenu = menu;
+    for (Window* window : m_windows) {
+        if (!window->m_parent)
+            window->updateDockMenu();
+    }
+}
+
+Menu* Application::dockMenu() const
+{
+    return s_dockMenu;
 }
 
 void Application::setApplicationId(std::string applicationId)

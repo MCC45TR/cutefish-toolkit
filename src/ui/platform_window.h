@@ -130,7 +130,7 @@ public:
     // false where the compositor places windows itself.
     virtual bool setScreenPosition(PointF) { return false; }
     virtual void setUserResizable(bool) {}
-    // Toplevels only: the main menu the status bar shows while the window is
+    // Toplevels only: the main menu the menu bar shows while the window is
     // active, null for none.
     virtual void setMainMenu(Menu*) {}
     // A status item's identifier and highlight request.
@@ -184,6 +184,7 @@ protected:
     void notifyKeyboardLeave();
     void notifyKey(const KeyEvent& event, bool pressed);
     void notifyHold();
+    void notifyGesture(const GestureEvent& event);
     void notifyTouchDown(int32_t id, double x, double y);
     void notifyTouchMotion(int32_t id, double x, double y);
     void notifyTouchUp(int32_t id);

@@ -3,10 +3,13 @@
 
 #include <gtest/gtest.h>
 
+#include <chrono>
 #include <string>
 #include <utility>
 #include <vector>
 
+#include "base/event_loop.h"
+#include "ui/application.h"
 #include "ui/dialog_window.h"
 #include "ui/keys.h"
 #include "ui/label.h"
@@ -60,6 +63,55 @@ TEST(WindowTest, UnconstrainedConfigureWithoutSizeRestoresTheNormalSize)
         EXPECT_EQ(window.size().width, 400);
         EXPECT_EQ(window.size().height, 300);
     }
+}
+
+// A size suggestion sent before the compositor saw the window's new limits
+// (an activation right after the window resized itself) keeps the limits.
+TEST(WindowTest, FloatingConfigureKeepsTheWindowsLimits)
+{
+    Window window;
+    window.setContentView(std::make_unique<View>());
+    window.resize({179, 254});
+    window.setMinimumSize({179, 254});
+    window.setMaximumSize({179, 254});
+    window.show();
+    TestInput::configure(window, 179, 254, {});
+    window.resize({179, 309});
+    window.setMinimumSize({179, 309});
+    window.setMaximumSize({179, 309});
+    TestInput::configure(window, 179, 254, {.activated = true});
+    EXPECT_EQ(window.size().width, 179);
+    EXPECT_EQ(window.size().height, 309);
+
+    // Without limits the suggestion still sizes the window.
+    window.setMinimumSize({});
+    window.setMaximumSize({16777215, 16777215});
+    TestInput::configure(window, 200, 260, {.activated = true});
+    EXPECT_EQ(window.size().width, 200);
+    EXPECT_EQ(window.size().height, 260);
+}
+
+// A maximum of 0 on an axis is no limit, as it is to the compositor.
+TEST(WindowTest, FloatingConfigureTreatsAZeroMaximumAsNoLimit)
+{
+    Window window;
+    window.setContentView(std::make_unique<View>());
+    window.resize({300, 200});
+    window.setMinimumSize({300, 200});
+    window.setMaximumSize({0, 0});
+    window.show();
+    TestInput::configure(window, 900, 600, {});
+    EXPECT_EQ(window.size().width, 900);
+    EXPECT_EQ(window.size().height, 600);
+
+    window.setMaximumSize({500, 0});
+    TestInput::configure(window, 800, 700, {.activated = true});
+    EXPECT_EQ(window.size().width, 500);
+    EXPECT_EQ(window.size().height, 700);
+
+    TestInput::configure(window, 100, 100, {.activated = true});
+    EXPECT_EQ(window.size().width, 300);
+    EXPECT_EQ(window.size().height, 200);
 }
 
 // The headless platform answers maximize and full screen with a configure
@@ -374,6 +426,32 @@ TEST(WindowTest, DialogWithoutControlsKeepsTheTallerHeader)
     EXPECT_EQ(dialog.window()->size().height, 44 + 100 + 16);
 }
 
+TEST(WindowTest, DialogOfAFixedHeightGivesTheRestToItsContent)
+{
+    Window parent;
+    parent.resize({400, 300});
+    parent.setContentView(std::make_unique<View>());
+    parent.show();
+
+    DialogWindow dialog(&parent, "Details", 320);
+    auto column = std::make_unique<Column>();
+    View* content = column.get();
+    column->addChild<View>()->setLayoutHints({.preferredHeight = 100});
+    dialog.setContentView(std::move(column));
+    dialog.setHeight(400);
+    dialog.show();
+    dialog.window()->grab();
+    EXPECT_EQ(dialog.window()->size().height, 400);
+    EXPECT_EQ(content->geometry().y, 32 + 4);
+    EXPECT_EQ(content->geometry().height, 400 - 32 - 4 - 16);
+
+    dialog.setCloseVisible(false);
+    dialog.window()->grab();
+    EXPECT_EQ(dialog.window()->size().height, 400);
+    EXPECT_EQ(content->geometry().y, 44);
+    EXPECT_EQ(content->geometry().height, 400 - 44 - 16);
+}
+
 TEST(WindowTest, ThemeChangesReachLabels)
 {
     Window window;
@@ -487,6 +565,28 @@ TEST(WindowTest, ToolTipCentresItsText)
             window.unpinToolTip(target);
         }
     }
+}
+
+// Moving off a view with a tool tip onto one without hides the tip at once,
+// as moving onto another view with one or out of the window does.
+TEST(WindowTest, ToolTipHidesWhenThePointerLeavesItsView)
+{
+    Window window;
+    window.resize({400, 200});
+    window.setContentView(std::make_unique<View>());
+    View* target = window.contentView()->addChild<View>();
+    target->setGeometry({180, 120, 40, 40});
+    target->setToolTip("Stop");
+    window.show();
+    window.grab();
+    TestInput::movePointer(window, {200, 140});
+    cutefish::base::EventLoop& loop = Application::instance()->loop();
+    loop.startTimer(std::chrono::milliseconds(800), false, [&loop] { loop.quit(); });
+    loop.run();
+    ASSERT_NE(TestInput::toolTip(window), nullptr);
+
+    TestInput::movePointer(window, {60, 60});
+    EXPECT_EQ(TestInput::toolTip(window), nullptr);
 }
 
 // A label in no window, given a window's text layout mode, measures as the

@@ -80,6 +80,7 @@ set(CUTEFISH_TOOLKIT_PUBLIC_HEADERS
     ui/dialog_window.h
     ui/drag.h
     ui/drop_down_popup.h
+    ui/editable_text.h
     ui/file_drop_area.h
     ui/embedded_gpu.h
     ui/embedded_host.h
@@ -95,6 +96,7 @@ set(CUTEFISH_TOOLKIT_PUBLIC_HEADERS
     ui/icon.h
     ui/icon_image.h
     ui/image.h
+    ui/image_info.h
     ui/image_view.h
     ui/keys.h
     ui/label.h
@@ -105,6 +107,7 @@ set(CUTEFISH_TOOLKIT_PUBLIC_HEADERS
     ui/path.h
     ui/popup_glass.h
     ui/progress_bar.h
+    ui/raster_image.h
     ui/cell_layout.h
     ui/round_image_button.h
     ui/scroll_bar.h
@@ -112,6 +115,8 @@ set(CUTEFISH_TOOLKIT_PUBLIC_HEADERS
     ui/scroller.h
     ui/search_field.h
     ui/segmented_control.h
+    ui/sidebar_divider.h
+    ui/shortcut_convention.h
     ui/slider.h
     ui/status_item.h
     ui/styled_label.h
@@ -130,6 +135,7 @@ set(CUTEFISH_TOOLKIT_PUBLIC_HEADERS
     ui/window_controls.h
     ui/window_header.h
     ui/window_tab_bar.h
+    ui/zoomable_image_view.h
 )
 
 add_library(cutefish-toolkit SHARED
@@ -178,6 +184,7 @@ add_library(cutefish-toolkit SHARED
     ui/image_decoder.cpp
     ui/jxl_library.cpp
     ui/image_formats.cpp
+    ui/image_info.cpp
     ui/image_view.cpp
     ui/label.cpp
     ui/line_breaks.cpp
@@ -186,6 +193,7 @@ add_library(cutefish-toolkit SHARED
     ui/menu.cpp
     ui/multi_effect_blur.cpp
     ui/painter.cpp
+    ui/raster_image.cpp
     ui/path.cpp
     ui/bitmap.cpp
     ui/bitmap_painter.cpp
@@ -207,6 +215,8 @@ add_library(cutefish-toolkit SHARED
     ui/scroller.cpp
     ui/search_field.cpp
     ui/segmented_control.cpp
+    ui/sidebar_divider.cpp
+    ui/shortcut_convention.cpp
     ui/slider.cpp
     ui/status_item.cpp
     ui/styled_label.cpp
@@ -231,6 +241,7 @@ add_library(cutefish-toolkit SHARED
     ui/window_restore.cpp
     ui/window_header.cpp
     ui/window_tab_bar.cpp
+    ui/zoomable_image_view.cpp
     ${xdg-shell_SOURCES}
     ${viewporter_SOURCES}
     ${presentation-time_SOURCES}

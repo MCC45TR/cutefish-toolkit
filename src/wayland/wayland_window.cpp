@@ -344,6 +344,12 @@ void WaylandWindow::setCursorShape(CursorShape shape)
         m_shell->connection().setCursorShape(m_shell.get(), shape);
 }
 
+void WaylandWindow::setCursorImage(const Bitmap& image, int scale, double hotX, double hotY)
+{
+    if (m_shell)
+        m_shell->connection().setCursorImage(m_shell.get(), image, scale, hotX, hotY);
+}
+
 void WaylandWindow::setTextInput(const TextInputState* state)
 {
     if (!m_shell)
@@ -473,6 +479,18 @@ void WaylandWindow::setMainMenu(Menu* menu)
     m_mainMenu = std::move(mirror);
     cutefish_main_menu_manager_v1_set_main_menu(m_connection->mainMenus(), m_shell->surface(),
                                                 m_mainMenu ? m_mainMenu->proxy() : nullptr);
+}
+
+void WaylandWindow::setDockMenu(Menu* menu)
+{
+    if (!m_shell || !m_shell->toplevel() || !m_connection->mainMenus())
+        return;
+    std::shared_ptr<MainMenuMirror> mirror = m_connection->mainMenu(menu);
+    if (mirror == m_dockMenu)
+        return;
+    m_dockMenu = std::move(mirror);
+    cutefish_main_menu_manager_v1_set_dock_menu(m_connection->mainMenus(), m_shell->surface(),
+                                                m_dockMenu ? m_dockMenu->proxy() : nullptr);
 }
 
 void WaylandWindow::setStatusItemIdentifier(const std::string& identifier)
@@ -627,6 +645,11 @@ void WaylandWindow::key(const KeyEvent& event, bool pressed)
 void WaylandWindow::pointerHold()
 {
     notifyHold();
+}
+
+void WaylandWindow::pointerGesture(const GestureEvent& event)
+{
+    notifyGesture(event);
 }
 
 void WaylandWindow::touchDown(int32_t id, double x, double y)

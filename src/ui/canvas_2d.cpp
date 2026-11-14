@@ -13,6 +13,7 @@
 #include "include/core/SkBlendMode.h"
 #include "include/core/SkBlurTypes.h"
 #include "include/core/SkCanvas.h"
+#include "include/core/SkColorFilter.h"
 #include "include/core/SkImage.h"
 #include "include/core/SkMaskFilter.h"
 #include "include/core/SkPaint.h"
@@ -21,6 +22,7 @@
 #include "include/core/SkPixelRef.h"
 #include "include/core/SkShader.h"
 #include "include/core/SkSurface.h"
+#include "include/effects/SkColorMatrix.h"
 #include "include/effects/SkDashPathEffect.h"
 #include "include/effects/SkGradient.h"
 #include "include/effects/SkImageFilters.h"
@@ -577,6 +579,11 @@ void Canvas2D::clipToImage(SkImage* image, const RectF& rect, bool mirrored)
 
 void Canvas2D::blurBackdrop(const Path& path, double radius)
 {
+    blurBackdrop(path, radius, 1);
+}
+
+void Canvas2D::blurBackdrop(const Path& path, double radius, double saturation)
+{
     if (!m_canvas || radius <= 0 || path.isEmpty())
         return;
     // The radius is in the canvas's own units; the filter works in the
@@ -590,9 +597,57 @@ void Canvas2D::blurBackdrop(const Path& path, double radius)
     m_canvas->clipPath(PathAccess::toSkPath(path), m_state.antialias);
     SkPaint replace;
     replace.setBlendMode(SkBlendMode::kSrc);
-    const sk_sp<SkImageFilter> blur = SkImageFilters::Blur(sigma, sigma, SkTileMode::kClamp, nullptr);
+    sk_sp<SkImageFilter> blur = SkImageFilters::Blur(sigma, sigma, SkTileMode::kClamp, nullptr);
+    if (saturation != 1) {
+        SkColorMatrix matrix;
+        matrix.setSaturation(SkScalar(std::max(saturation, 0.0)));
+        blur = SkImageFilters::ColorFilter(SkColorFilters::Matrix(matrix), std::move(blur));
+    }
     m_canvas->saveLayer(SkCanvas::SaveLayerRec(nullptr, &replace, blur.get(), 0));
     m_canvas->restore();
+    m_canvas->restore();
+}
+
+void Canvas2D::blurBackdropBelowGroups(const Path& path, double radius, double saturation)
+{
+    bool grouped = m_state.groups > 0;
+    for (const State& saved : m_saved)
+        grouped = grouped || saved.groups > 0;
+    if (!grouped) {
+        blurBackdrop(path, radius, saturation);
+        return;
+    }
+    if (!m_canvas || radius <= 0 || path.isEmpty())
+        return;
+    // Groups are layers in the surface's own device space; the surface
+    // holds what was drawn before the outermost one began.
+    const SkVector device = m_owned->base.mapVector(SkScalar(radius), 0);
+    const SkScalar sigma = device.length() / 2;
+    const SkPath skPath = PathAccess::toSkPath(path);
+    SkRect bounds = m_canvas->getTotalMatrix().mapRect(skPath.getBounds());
+    if (!bounds.intersect(SkRect::Make(m_canvas->getDeviceClipBounds())))
+        return;
+    SkIRect area = bounds.roundOut().makeOutset(int(std::ceil(sigma * 3)), int(std::ceil(sigma * 3)));
+    if (!area.intersect(SkIRect::MakeSize(m_canvas->getBaseLayerSize())))
+        return;
+    SkBitmap under;
+    if (!under.tryAllocPixels(SkImageInfo::MakeN32Premul(area.width(), area.height()))
+        || !m_canvas->readPixels(under, area.x(), area.y()))
+        return;
+    under.setImmutable();
+    sk_sp<SkImageFilter> blur = SkImageFilters::Blur(sigma, sigma, SkTileMode::kClamp, nullptr);
+    if (saturation != 1) {
+        SkColorMatrix matrix;
+        matrix.setSaturation(SkScalar(std::max(saturation, 0.0)));
+        blur = SkImageFilters::ColorFilter(SkColorFilters::Matrix(matrix), std::move(blur));
+    }
+    m_canvas->save();
+    m_canvas->clipPath(skPath, m_state.antialias);
+    m_canvas->resetMatrix();
+    SkPaint replace;
+    replace.setBlendMode(SkBlendMode::kSrc);
+    replace.setImageFilter(std::move(blur));
+    m_canvas->drawImage(under.asImage(), SkScalar(area.x()), SkScalar(area.y()), SkSamplingOptions(), &replace);
     m_canvas->restore();
 }
 
