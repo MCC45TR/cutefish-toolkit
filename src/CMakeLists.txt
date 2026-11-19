@@ -91,6 +91,7 @@ set(CUTEFISH_TOOLKIT_PUBLIC_HEADERS
     ui/geometry_conversions.h
     ui/glyph_run.h
     ui/file_chooser.h
+    ui/font_file.h
     ui/header_backdrop.h
     ui/header_button.h
     ui/header_button_group.h
@@ -133,6 +134,7 @@ set(CUTEFISH_TOOLKIT_PUBLIC_HEADERS
     ui/trusted_connection.h
     ui/toggle_control.h
     ui/view.h
+    ui/view_glass.h
     ui/window.h
     ui/window_controls.h
     ui/window_header.h
@@ -171,6 +173,7 @@ add_library(cutefish-toolkit SHARED
     ui/embedded_gpu.cpp
     ui/embedded_window.cpp
     ui/font_fallback.cpp
+    ui/font_file.cpp
     ui/frame_client.cpp
     ui/geometry.cpp
     ui/glyph_run.cpp
@@ -239,6 +242,7 @@ add_library(cutefish-toolkit SHARED
     ui/trusted_connection.cpp
     ui/toggle_control.cpp
     ui/view.cpp
+    ui/view_glass.cpp
     ui/window.cpp
     ui/window_compositing.cpp
     ui/window_controls.cpp
